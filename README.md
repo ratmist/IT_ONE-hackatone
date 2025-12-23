@@ -11,12 +11,7 @@
                                                                                       `"""""""""""""`
 </pre>
 <p align="center">
-  <a href="README.md">
-    <img src="https://img.shields.io/badge/EN-F2C94C?style=for-the-badge&logo=googletranslate&logoColor=000000">
-  </a>
-  <a href="README.ru.md">
-    <img src="https://img.shields.io/badge/RU-C0392B?style=for-the-badge&logo=googletranslate&logoColor=FFFFFF">
-  </a>
+  <a href="README.md"><img src="https://img.shields.io/badge/EN-F2C94C?style=for-the-badge&logo=googletranslate&logoColor=000000"></a><a href="README.ru.md"><img src="https://img.shields.io/badge/RU-C0392B?style=for-the-badge&logo=googletranslate&logoColor=FFFFFF"></a>
 </p>
 
 # Suspicious Transaction Detection Platform
