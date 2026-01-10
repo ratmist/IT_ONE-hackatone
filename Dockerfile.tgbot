@@ -1,0 +1,11 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements-tgbot.txt .
+
+RUN pip install -r requirements-tgbot.txt
+
+COPY telegram_bot.py .
+
+CMD ["python", "telegram_bot.py"]

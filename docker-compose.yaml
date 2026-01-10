@@ -1,0 +1,336 @@
+version: '3.8'
+
+x-fraud-worker: &fraud-worker
+  build:
+    context: .
+    dockerfile: Dockerfile.worker
+  restart: unless-stopped
+  environment:
+    DB_NAME: ${DB_NAME:-hackaton_db}
+    DB_USER: ${DB_USER:-postgres}
+    DB_PASSWORD: ${DB_PASSWORD:-Masha1226}
+    DB_HOST: postgres
+    DB_PORT: 5432
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    TX_STREAM: transactions_stream
+    TX_GROUP: fraud_group
+    LOG_DIR: /app/logs
+  volumes:
+    - ./logs:/app/logs
+  depends_on:
+    - postgres
+    - redis
+  networks:
+    - backend
+    - monitoring
+  command: python backend/fraud_worker.py
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-hackaton_db}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-Masha1226}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - backend
+      - monitoring
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+      - monitoring
+
+  backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_NAME=${DB_NAME:-hackaton_db}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-Masha1226}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - TX_STREAM=transactions_stream
+      - TX_GROUP=fraud_group
+    volumes:
+      - ./backend:/app/backend
+      - ./logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - backend
+      - monitoring
+    command: >
+      sh -c "while ! nc -z postgres 5432; do sleep 1; done;
+             python backend/manage.py migrate &&
+             python backend/manage.py makemigrations transactions &&
+             python backend/manage.py runserver 0.0.0.0:8000"
+  fraud-worker-1:
+    <<: *fraud-worker
+
+  fraud-worker-2:
+    <<: *fraud-worker
+
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: frontend
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./frontend:/app/frontend
+    networks:
+      - frontend
+      - backend
+
+  webhook-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.webhook
+    container_name: webhook-server
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    networks:
+      - backend
+  
+  alerts-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: alerts-consumer
+    restart: unless-stopped
+    environment:
+    - REDIS_HOST=redis
+    - REDIS_PORT=6379
+    - ALERTS_QUEUE=alerts_queue
+    - WEBHOOK_BASE_URL=http://webhook-server:8002
+    depends_on:
+      - redis
+      - webhook-server
+    networks:
+      - backend
+    command: python backend/transactions/alerts_consumer.py
+  
+  ml-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: ml-worker
+    restart: unless-stopped
+    environment:
+      - REDIS_HOST=redis
+      - PYTHONPATH=/app/backend
+    depends_on:
+      - redis
+    networks:
+      - backend
+    command: python backend/transactions/ml_worker.py
+
+  tg-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: tg-worker
+    restart: unless-stopped
+    environment:
+      - REDIS_HOST=redis
+      - TG_ALERT_ENDPOINT=http://telegram-bot:8082/alert
+    depends_on:
+      - redis
+      - telegram-bot
+    networks:
+      - backend
+    command: python backend/transactions/tg_worker.py
+ 
+  elasticsearch:
+    image: elasticsearch:7.17.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - elk
+      - monitoring
+
+  logstash:
+    image: logstash:7.17.0
+    container_name: logstash
+    volumes:
+      - ./logstash/config:/usr/share/logstash/config
+      - ./logstash/pipeline:/usr/share/logstash/pipeline
+    ports:
+      - "5044:5044"
+      - "5001:5000/tcp"
+      - "5001:5000/udp"
+      - "9600:9600"
+    environment:
+      LS_JAVA_OPTS: "-Xmx256m -Xms256m"
+    networks:
+      - elk
+      - monitoring
+    depends_on:
+      - elasticsearch
+
+  kibana:
+    image: kibana:7.17.0
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - elk
+      - monitoring
+    depends_on:
+      - elasticsearch
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./config:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./generated_dashboards:/app/generated_dashboards
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    depends_on:
+      - postgres
+    networks:
+      - monitoring
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.1
+    container_name: cadvisor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - monitoring
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: redis-exporter
+    restart: unless-stopped
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      - redis
+    networks:
+      - monitoring
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-Masha1226}@postgres:5432/${DB_NAME:-hackaton_db}?sslmode=disable"
+    ports:
+      - "9187:9187"
+    depends_on:
+      - postgres
+    networks:
+      - monitoring
+
+  elasticsearch-exporter:
+    image: prometheuscommunity/elasticsearch-exporter:latest
+    container_name: elasticsearch-exporter
+    restart: unless-stopped
+    ports:
+      - "9114:9114"
+    environment:
+      - ES_URI=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - monitoring
+      - elk 
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.tgbot
+    container_name: telegram-bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+    ports:
+      - "8082:8082"  
+    networks:
+      - backend
+
+
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
+  monitoring:
+    driver: bridge
+  elk:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis_data:
+  prometheus_data:
+  grafana-data:
+  elasticsearch_data:

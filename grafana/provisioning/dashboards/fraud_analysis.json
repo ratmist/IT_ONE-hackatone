@@ -1,0 +1,61 @@
+{
+  "id": null,
+  "uid": "Transactions-analysis",
+  "title": "Fraud Analysis — Enhanced",
+  "tags": ["fraud", "transactions", "payment-methods"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 2,
+  "datasource": {
+    "type": "postgres",
+    "uid": "grafana-postgresql-datasource"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total Transactions per Day",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "grafana-postgresql-datasource" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('day', timestamp) AS time, COUNT(*) AS value FROM transactions WHERE $__timeFilter(timestamp) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Payment Methods Distribution",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "grafana-postgresql-datasource" },
+      "targets": [
+        {
+          "rawSql": "SELECT payment_channel as method, COUNT(*) as count FROM transactions WHERE $__timeFilter(timestamp) GROUP BY payment_channel ORDER BY count DESC",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Fraud Rate by Payment Method",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "grafana-postgresql-datasource" },
+      "targets": [
+        {
+          "rawSql": "SELECT payment_channel, SUM(CASE WHEN status = 'alerted' THEN 1 ELSE 0 END) AS suspicious_count, ROUND(100.0 * SUM(CASE WHEN status = 'alerted' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS suspicious_rate FROM transactions WHERE timestamp >= '2023-01-01' AND timestamp < '2024-01-01' GROUP BY payment_channel ORDER BY suspicious_count DESC",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "time": {
+    "from": "now-3y",
+    "to": "now"
+  }
+}

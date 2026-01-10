@@ -1,0 +1,19 @@
+apiVersion: 1
+
+datasources:
+  - name: grafana-postgresql-datasource1
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: hackaton_db
+    user: postgres
+    secureJsonData:
+      password: "Masha1226"
+    jsonData:
+      sslmode: "disable"
+      maxOpenConns: 100
+      maxIdleConns: 100
+      maxIdleConnsAuto: true
+      connMaxLifetime: 14400
+      postgresVersion: 1500
+      timescaledb: false
