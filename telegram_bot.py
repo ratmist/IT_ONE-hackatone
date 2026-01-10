@@ -91,7 +91,7 @@ def init_bot(token: str):
     return bot
 
 def main():
-    token = '8441982665:AAEQUQWTRKuZL3rNNZPun1a0gFfs2Y0OHHo'
+    token = ''
     if not token:
         logger.error("TELEGRAM_BOT_TOKEN environment variable is required!")
         return
@@ -104,4 +104,5 @@ def main():
         logger.info("Bot stopped")
 
 if __name__ == '__main__':
+
     main()
